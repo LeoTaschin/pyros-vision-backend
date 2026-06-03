@@ -5,12 +5,7 @@ Envia imagem para a API hosted do Roboflow e retorna bounding boxes.
 
 import base64
 import os
-import requests
-
-
-ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "")
-ROBOFLOW_PROJECT = os.environ.get("ROBOFLOW_PROJECT", "")
-ROBOFLOW_VERSION = os.environ.get("ROBOFLOW_VERSION", "1")
+import httpx
 
 
 def _nivel(confidence: float) -> str:
@@ -21,35 +16,40 @@ def _nivel(confidence: float) -> str:
     return "MONITORANDO"
 
 
-def detectar(imagem_bytes: bytes) -> dict:
+def _resposta_vazia(fonte: str) -> dict:
+    return {"deteccoes": [], "total": 0, "nivel_geral": "SEGURO", "fonte": fonte}
+
+
+async def detectar(imagem_bytes: bytes) -> dict:
     """
     Recebe bytes de uma imagem (JPEG/PNG) e retorna detecções do Roboflow.
 
     Retorno:
       {
-        "deteccoes": [{"classe": "fire", "confianca": 0.95, "nivel": "CRITICO",
+        "deteccoes": [{"classe": "Fire", "confianca": 0.95, "nivel": "CRITICO",
                         "x": 100, "y": 200, "largura": 50, "altura": 60}, ...],
         "total": 2,
         "nivel_geral": "CRITICO",
         "fonte": "roboflow" | "indisponivel"
       }
     """
-    if not ROBOFLOW_API_KEY or not ROBOFLOW_PROJECT:
+    api_key = os.environ.get("ROBOFLOW_API_KEY", "")
+    project = os.environ.get("ROBOFLOW_PROJECT", "")
+    version = os.environ.get("ROBOFLOW_VERSION", "1")
+
+    if not api_key or not project:
         return _resposta_vazia("roboflow_nao_configurado")
 
     imagem_b64 = base64.b64encode(imagem_bytes).decode("utf-8")
-    url = (
-        f"https://detect.roboflow.com/{ROBOFLOW_PROJECT}/{ROBOFLOW_VERSION}"
-        f"?api_key={ROBOFLOW_API_KEY}"
-    )
+    url = f"https://detect.roboflow.com/{project}/{version}?api_key={api_key}"
 
     try:
-        resp = requests.post(
-            url,
-            data=imagem_b64,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=10,
-        )
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                url,
+                content=imagem_b64,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
         resp.raise_for_status()
         predictions = resp.json().get("predictions", [])
 
@@ -79,7 +79,3 @@ def detectar(imagem_bytes: bytes) -> dict:
 
     except Exception:
         return _resposta_vazia("indisponivel")
-
-
-def _resposta_vazia(fonte: str) -> dict:
-    return {"deteccoes": [], "total": 0, "nivel_geral": "SEGURO", "fonte": fonte}

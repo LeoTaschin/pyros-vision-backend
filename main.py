@@ -15,20 +15,20 @@ Integrantes:
   Leonardo Taschin  — RM 554583
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # deve rodar antes de qualquer import que leia os.environ
+
 import base64
 import os
 import time
 from datetime import datetime
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from satelite import buscar_focos
 from detector import detectar
 from drones import listar_drones
-
-load_dotenv()
 
 app = FastAPI(
     title="Pyros Vision API",
@@ -126,7 +126,7 @@ async def analisar_imagem(file: UploadFile = File(...)):
     Aceita JPEG ou PNG.
     """
     imagem_bytes = await file.read()
-    resultado = detectar(imagem_bytes)
+    resultado = await detectar(imagem_bytes)
     return resultado
 
 
@@ -151,7 +151,7 @@ async def ws_camera(websocket: WebSocket):
                 continue
 
             imagem_bytes = base64.b64decode(frame_b64)
-            resultado    = detectar(imagem_bytes)
+            resultado    = await detectar(imagem_bytes)
             await websocket.send_json(resultado)
 
     except WebSocketDisconnect:
