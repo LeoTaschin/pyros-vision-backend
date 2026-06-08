@@ -12,6 +12,7 @@ Rotas:
   POST /api/sensores    → recebe leitura do ESP32 (DHT11 + MQ-2)
   GET  /api/sensores    → histórico de leituras (últimas 50)
   GET  /api/sensores/ultimo → leitura mais recente
+  WS   /ws/sensores     → broadcast em tempo real das leituras do ESP32
 
 Integrantes:
   Gabriel Galerani  — RM 557421
@@ -21,7 +22,9 @@ Integrantes:
 from dotenv import load_dotenv
 load_dotenv()  # deve rodar antes de qualquer import que leia os.environ
 
+import asyncio
 import base64
+import json
 import os
 import time
 from datetime import datetime
@@ -56,6 +59,9 @@ _CACHE_TTL = 60  # segundos
 
 # Histórico de leituras do ESP32 (máx. 50 entradas em memória)
 _leituras: deque = deque(maxlen=50)
+
+# Clientes WebSocket conectados na página de sensores
+_ws_sensores: set[WebSocket] = set()
 
 
 class LeituraESP32(BaseModel):
@@ -152,10 +158,19 @@ async def analisar_imagem(file: UploadFile = File(...)):
 
 @app.post("/api/sensores")
 async def post_sensor(leitura: LeituraESP32):
-    """Recebe leitura do ESP32 (DHT11 + MQ-2) e armazena no histórico."""
+    """Recebe leitura do ESP32, armazena e faz broadcast para clientes WS."""
     registro = leitura.model_dump()
     registro["timestamp"] = datetime.utcnow().isoformat()
     _leituras.append(registro)
+
+    # Broadcast para todos os clientes conectados em /ws/sensores
+    if _ws_sensores:
+        msg = json.dumps(registro)
+        await asyncio.gather(
+            *[ws.send_text(msg) for ws in _ws_sensores],
+            return_exceptions=True,
+        )
+
     return {"ok": True, "timestamp": registro["timestamp"]}
 
 
@@ -177,6 +192,32 @@ async def get_sensor_ultimo():
 
 
 # ── WebSocket ────────────────────────────────────────────────────
+
+
+@app.websocket("/ws/sensores")
+async def ws_sensores(websocket: WebSocket):
+    """
+    Broadcast em tempo real das leituras do ESP32.
+
+    Servidor → Cliente: { device_id, temperatura, umidade, fumaca, nivel, timestamp }
+    """
+    await websocket.accept()
+    _ws_sensores.add(websocket)
+    try:
+        # Envia o histórico imediatamente ao conectar
+        await websocket.send_text(json.dumps({
+            "tipo": "historico",
+            "leituras": list(reversed(_leituras)),
+        }))
+        # Mantém a conexão aberta aguardando novas leituras
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        _ws_sensores.discard(websocket)
 
 
 @app.websocket("/ws/camera")
