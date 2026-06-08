@@ -9,6 +9,9 @@ Rotas:
   GET  /api/drones      → frota de drones de combate
   POST /api/analisar    → upload de imagem → Roboflow
   WS   /ws/camera       → stream câmera ao vivo → Roboflow
+  POST /api/sensores    → recebe leitura do ESP32 (DHT11 + MQ-2)
+  GET  /api/sensores    → histórico de leituras (últimas 50)
+  GET  /api/sensores/ultimo → leitura mais recente
 
 Integrantes:
   Gabriel Galerani  — RM 557421
@@ -23,8 +26,11 @@ import os
 import time
 from datetime import datetime
 
+from collections import deque
+
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from satelite import buscar_focos
 from detector import detectar
@@ -47,6 +53,17 @@ app.add_middleware(
 # Cache de focos (evita chamar NASA a cada request)
 _cache: dict = {"dados": [], "ts": None}
 _CACHE_TTL = 60  # segundos
+
+# Histórico de leituras do ESP32 (máx. 50 entradas em memória)
+_leituras: deque = deque(maxlen=50)
+
+
+class LeituraESP32(BaseModel):
+    device_id: str = "esp32-01"
+    temperatura: float | None = None
+    umidade: float | None = None
+    fumaca: int
+    nivel: str  # NORMAL | ATENCAO | PERIGO
 
 
 # ── REST ─────────────────────────────────────────────────────────
@@ -128,6 +145,35 @@ async def analisar_imagem(file: UploadFile = File(...)):
     imagem_bytes = await file.read()
     resultado = await detectar(imagem_bytes)
     return resultado
+
+
+# ── ESP32 / Sensores de Campo ────────────────────────────────────
+
+
+@app.post("/api/sensores")
+async def post_sensor(leitura: LeituraESP32):
+    """Recebe leitura do ESP32 (DHT11 + MQ-2) e armazena no histórico."""
+    registro = leitura.model_dump()
+    registro["timestamp"] = datetime.utcnow().isoformat()
+    _leituras.append(registro)
+    return {"ok": True, "timestamp": registro["timestamp"]}
+
+
+@app.get("/api/sensores")
+async def get_sensores():
+    """Retorna histórico de leituras (últimas 50)."""
+    return {
+        "leituras": list(reversed(_leituras)),
+        "total": len(_leituras),
+    }
+
+
+@app.get("/api/sensores/ultimo")
+async def get_sensor_ultimo():
+    """Retorna a leitura mais recente do ESP32."""
+    if not _leituras:
+        return {"leitura": None}
+    return {"leitura": _leituras[-1]}
 
 
 # ── WebSocket ────────────────────────────────────────────────────
