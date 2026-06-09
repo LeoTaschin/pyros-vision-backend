@@ -29,8 +29,8 @@ import json
 import os
 import time
 from datetime import datetime
-
 from collections import deque
+from typing import Optional, Set
 
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,8 +42,8 @@ from drones import listar_drones
 
 app = FastAPI(
     title="Pyros Vision API",
-    description="Detecção de queimadas — NASA FIRMS + Roboflow",
-    version="3.0.0",
+    description="Detecção de queimadas — NASA FIRMS + YOLO local",
+    version="4.0.0",
 )
 
 app.add_middleware(
@@ -62,13 +62,13 @@ _CACHE_TTL = 60  # segundos
 _leituras: deque = deque(maxlen=50)
 
 # Clientes WebSocket conectados na página de sensores
-_ws_sensores: set[WebSocket] = set()
+_ws_sensores: Set[WebSocket] = set()
 
 
 class LeituraESP32(BaseModel):
     device_id: str = "esp32-01"
-    temperatura: float | None = None
-    umidade: float | None = None
+    temperatura: Optional[float] = None
+    umidade: Optional[float] = None
     fumaca: int
     nivel: str  # NORMAL | ATENCAO | PERIGO
 
@@ -80,8 +80,8 @@ class LeituraESP32(BaseModel):
 async def health():
     return {
         "status": "ok",
-        "sistema": "Pyros Vision API v3.0",
-        "roboflow_project": os.environ.get("ROBOFLOW_PROJECT", "nao_configurado"),
+        "sistema": "Pyros Vision API v4.0",
+        "detector": "yolo-local",
     }
 
 
@@ -228,7 +228,7 @@ async def ws_camera(websocket: WebSocket):
 
     Cliente  → Servidor:  { "frame": "<JPEG em base64>" }
     Servidor → Cliente:   { "deteccoes": [...], "total": N,
-                             "nivel_geral": "ALERTA", "fonte": "roboflow" }
+                             "nivel_geral": "ALERTA", "fonte": "local" }
     """
     await websocket.accept()
     try:
