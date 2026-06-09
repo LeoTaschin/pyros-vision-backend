@@ -17,6 +17,7 @@ Rotas:
 Integrantes:
   Gabriel Galerani  — RM 557421
   Leonardo Taschin  — RM 554583
+  Gustavo Alves - RM 557876
 """
 
 from dotenv import load_dotenv
